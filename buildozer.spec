@@ -1,4 +1,4 @@
-%%writefile buildozer.spec
+
 [app]
 title = ReelFlow
 package.name = reelflow
