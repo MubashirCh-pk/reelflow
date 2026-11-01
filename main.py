@@ -1,214 +1,346 @@
 
 import os
 import threading
+from urllib.parse import urlparse
 
+import kivy
 from kivy.app import App
-from kivy.clock import mainthread
-from kivy.core.window import Window
-from kivy.lang import Builder
-from kivy.properties import NumericProperty, StringProperty
-from kivy.utils import platform
+from kivy.clock import Clock
+from kivy.metrics import dp
+from kivy.utils import get_color_from_hex
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+from kivy.uix.progressbar import ProgressBar
 
 import yt_dlp
 
-Window.clearcolor = (0.09, 0.10, 0.14, 1)
-
-KV = """
-BoxLayout:
-    orientation: "vertical"
-    padding: dp(20)
-    spacing: dp(14)
-
-    BoxLayout:
-        size_hint_y: None
-        height: dp(60)
-        spacing: dp(10)
-        Label:
-            text: "[b]ReelFlow[/b]"
-            markup: True
-            font_size: "28sp"
-            color: 0.55, 0.36, 0.96, 1
-            halign: "left"
-            text_size: self.size
-            valign: "middle"
-
-    Label:
-        text: "Paste an Instagram video link below"
-        font_size: "14sp"
-        color: 0.63, 0.63, 0.67, 1
-        size_hint_y: None
-        height: dp(30)
-
-    TextInput:
-        id: url_input
-        hint_text: "https://www.instagram.com/reel/..."
-        multiline: False
-        size_hint_y: None
-        height: dp(52)
-        font_size: "15sp"
-        background_color: 0.06, 0.07, 0.10, 1
-        foreground_color: 1, 1, 1, 1
-        hint_text_color: 0.45, 0.45, 0.5, 1
-        cursor_color: 0.55, 0.36, 0.96, 1
-        padding: dp(14), dp(14)
-
-    Button:
-        id: dl_btn
-        text: app.button_text
-        disabled: app.busy
-        size_hint_y: None
-        height: dp(52)
-        font_size: "16sp"
-        bold: True
-        background_normal: ""
-        background_color: 0.43, 0.36, 0.98, 1
-        on_release: app.start_download(url_input.text)
-
-    BoxLayout:
-        size_hint_y: None
-        height: dp(24)
-        Label:
-            text: app.status
-            font_size: "13sp"
-            color: 0.83, 0.83, 0.85, 1
-            halign: "left"
-            text_size: self.size
-        Label:
-            text: app.percent_text
-            font_size: "13sp"
-            bold: True
-            color: 0.65, 0.55, 0.98, 1
-            halign: "right"
-            text_size: self.size
-            size_hint_x: None
-            width: dp(70)
-
-    ProgressBar:
-        max: 100
-        value: app.progress
-        size_hint_y: None
-        height: dp(12)
-
-    Label:
-        text: "Saving to:\\n" + app.folder
-        font_size: "12sp"
-        color: 0.63, 0.63, 0.67, 1
-        halign: "left"
-        valign: "top"
-        text_size: self.width, None
-        size_hint_y: None
-        height: self.texture_size[1] + dp(10)
-
-    Widget:
-"""
-
 
 class ReelFlowApp(App):
-    status = StringProperty("Ready to download")
-    percent_text = StringProperty("0%")
-    progress = NumericProperty(0)
-    button_text = StringProperty("Download Reel")
-    busy = NumericProperty(0)
-    folder = StringProperty("")
 
     def build(self):
         self.title = "ReelFlow"
-        self.folder = self._pick_folder()
-        return Builder.load_string(KV)
 
-    # ---------- storage ----------
-    def _pick_folder(self):
-        if platform == "android":
-            from android.permissions import Permission, request_permissions
-            request_permissions([
-                Permission.WRITE_EXTERNAL_STORAGE,
-                Permission.READ_EXTERNAL_STORAGE,
-            ])
-            path = "/storage/emulated/0/Download/ReelFlow"
-        else:
-            path = os.path.join(os.path.expanduser("~"), "Downloads", "ReelFlow")
-        try:
-            os.makedirs(path, exist_ok=True)
-            return path
-        except Exception:
-            # Fallback: app-private storage (always writable)
-            return self.user_data_dir
+        # Main layout
+        root = BoxLayout(
+            orientation="vertical",
+            padding=dp(22),
+            spacing=dp(16)
+        )
 
-    def _writable_folder(self):
-        try:
-            os.makedirs(self.folder, exist_ok=True)
-            test = os.path.join(self.folder, ".write_test")
-            with open(test, "w") as f:
-                f.write("ok")
-            os.remove(test)
-            return self.folder
-        except Exception:
-            self.set_folder(self.user_data_dir)
-            return self.user_data_dir
+        # Background color
+        with root.canvas.before:
+            from kivy.graphics import Color, Rectangle
+            Color(rgba=get_color_from_hex("#10101A"))
+            self.background = Rectangle(
+                pos=root.pos,
+                size=root.size
+            )
 
-    @mainthread
-    def set_folder(self, path):
-        self.folder = path
+        root.bind(pos=self.update_background,
+                  size=self.update_background)
 
-    # ---------- UI updates (thread-safe) ----------
-    @mainthread
-    def set_status(self, text):
-        self.status = text
+        # App title
+        title = Label(
+            text="ReelFlow",
+            font_size="34sp",
+            bold=True,
+            color=get_color_from_hex("#A78BFA"),
+            size_hint_y=None,
+            height=dp(65)
+        )
+        root.add_widget(title)
 
-    @mainthread
-    def set_progress(self, percent):
-        self.progress = percent
-        self.percent_text = f"{percent:.1f}%"
+        # Subtitle
+        subtitle = Label(
+            text="Instagram Reels Downloader",
+            font_size="16sp",
+            color=get_color_from_hex("#D1D5DB"),
+            size_hint_y=None,
+            height=dp(35)
+        )
+        root.add_widget(subtitle)
 
-    @mainthread
-    def set_busy(self, busy):
-        self.busy = 1 if busy else 0
-        self.button_text = "Downloading..." if busy else "Download Reel"
+        # URL input field
+        self.url_input = TextInput(
+            hint_text="Paste Instagram Reel link here...",
+            multiline=False,
+            size_hint_y=None,
+            height=dp(55),
+            font_size="15sp",
+            padding=[dp(12), dp(16)],
+            background_normal="",
+            background_active="",
+            background_color=get_color_from_hex("#242438"),
+            foreground_color=get_color_from_hex("#FFFFFF"),
+            hint_text_color=get_color_from_hex("#9999AA"),
+            cursor_color=get_color_from_hex("#A78BFA")
+        )
+        root.add_widget(self.url_input)
 
-    # ---------- download ----------
-    def _hook(self, data):
-        if data.get("status") == "downloading":
-            total = data.get("total_bytes") or data.get("total_bytes_estimate")
-            done = data.get("downloaded_bytes", 0)
-            if total:
-                self.set_progress(done / total * 100)
-                self.set_status("Downloading your video...")
-        elif data.get("status") == "finished":
-            self.set_progress(100)
+        # Download button
+        self.download_button = Button(
+            text="DOWNLOAD REEL",
+            size_hint_y=None,
+            height=dp(55),
+            font_size="17sp",
+            bold=True,
+            background_normal="",
+            background_down="",
+            background_color=get_color_from_hex("#7C3AED"),
+            color=get_color_from_hex("#FFFFFF")
+        )
 
-    def start_download(self, url):
-        url = url.strip()
+        self.download_button.bind(
+            on_release=self.start_download
+        )
+        root.add_widget(self.download_button)
+
+        # Progress bar
+        self.progress = ProgressBar(
+            max=100,
+            value=0,
+            size_hint_y=None,
+            height=dp(12)
+        )
+        root.add_widget(self.progress)
+
+        # Status message
+        self.status_label = Label(
+            text="Ready to download",
+            font_size="14sp",
+            color=get_color_from_hex("#D1D5DB"),
+            size_hint_y=None,
+            height=dp(65),
+            halign="center",
+            valign="middle"
+        )
+        self.status_label.bind(
+            size=self.update_status_text
+        )
+        root.add_widget(self.status_label)
+
+        # Download location
+        self.location_label = Label(
+            text="Videos are saved in ReelFlow app storage.",
+            font_size="12sp",
+            color=get_color_from_hex("#9999AA"),
+            size_hint_y=None,
+            height=dp(55),
+            halign="center",
+            valign="middle"
+        )
+        self.location_label.bind(
+            size=self.update_location_text
+        )
+        root.add_widget(self.location_label)
+
+        # Footer
+        footer = Label(
+            text="ReelFlow  |  Version 1.0",
+            font_size="11sp",
+            color=get_color_from_hex("#777788"),
+            size_hint_y=None,
+            height=dp(30)
+        )
+        root.add_widget(footer)
+
+        return root
+
+    def update_background(self, instance, value):
+        self.background.pos = instance.pos
+        self.background.size = instance.size
+
+    def update_status_text(self, instance, value):
+        instance.text_size = value
+
+    def update_location_text(self, instance, value):
+        instance.text_size = value
+
+    # Check Instagram URL
+    def is_valid_instagram_url(self, url):
+
         if not url:
-            self.set_status("Please paste an Instagram link.")
-            return
-        if "instagram.com" not in url.lower():
-            self.set_status("Please enter a valid Instagram URL.")
-            return
+            return False
 
-        folder = self._writable_folder()
-        self.set_busy(True)
-        self.set_progress(0)
-        self.set_status("Connecting to Instagram...")
-        threading.Thread(target=self._worker, args=(url, folder), daemon=True).start()
+        if "://" not in url:
+            url = "https://" + url
 
-    def _worker(self, url, folder):
-        options = {
-            "outtmpl": os.path.join(folder, "%(title).80s.%(ext)s"),
-            # No ffmpeg on Android, so only single-file formats
-            "format": "best[ext=mp4]/best",
-            "noplaylist": True,
-            "progress_hooks": [self._hook],
-            "quiet": True,
-            "no_warnings": True,
-        }
         try:
-            with yt_dlp.YoutubeDL(options) as ydl:
-                ydl.download([url])
-            self.set_status("Download completed!")
+            parsed = urlparse(url)
+            host = (parsed.hostname or "").lower()
+
+            allowed_hosts = {
+                "instagram.com",
+                "www.instagram.com",
+                "m.instagram.com"
+            }
+
+            valid_path = (
+                parsed.path.startswith("/reel/") or
+                parsed.path.startswith("/reels/")
+            )
+
+            return (
+                parsed.scheme == "https"
+                and host in allowed_hosts
+                and valid_path
+            )
+
+        except Exception:
+            return False
+
+    # Start downloading
+    def start_download(self, instance):
+
+        url = self.url_input.text.strip()
+
+        if not self.is_valid_instagram_url(url):
+            self.status_label.text = (
+                "Please enter a valid Instagram Reel link."
+            )
+            return
+
+        if "://" not in url:
+            url = "https://" + url
+
+        self.progress.value = 0
+        self.download_button.disabled = True
+        self.download_button.text = "Downloading..."
+        self.status_label.text = "Connecting to Instagram..."
+
+        threading.Thread(
+            target=self.download_video,
+            args=(url,),
+            daemon=True
+        ).start()
+
+    # Download progress
+    def progress_hook(self, data):
+
+        if data["status"] == "downloading":
+
+            downloaded = data.get("downloaded_bytes", 0)
+
+            total = (
+                data.get("total_bytes")
+                or data.get("total_bytes_estimate")
+            )
+
+            if total:
+                percentage = downloaded / total * 100
+            else:
+                percentage = 0
+
+            Clock.schedule_once(
+                lambda dt, p=percentage:
+                self.update_progress(p), 0
+            )
+
+        elif data["status"] == "finished":
+
+            Clock.schedule_once(
+                lambda dt:
+                self.update_progress(100), 0
+            )
+
+            Clock.schedule_once(
+                lambda dt:
+                self.update_status("Processing video..."), 0
+            )
+
+    def update_progress(self, percentage):
+        self.progress.value = percentage
+        self.status_label.text = (
+            f"Downloading... {percentage:.1f}%"
+        )
+
+    def update_status(self, message):
+        self.status_label.text = message
+
+    # Actual download function
+    def download_video(self, url):
+
+        try:
+            download_folder = os.path.join(
+                self.user_data_dir,
+                "downloads"
+            )
+
+            os.makedirs(
+                download_folder,
+                exist_ok=True
+            )
+
+            options = {
+                "format": "best[ext=mp4]/best",
+
+                "outtmpl": os.path.join(
+                    download_folder,
+                    "%(title).80s-%(id)s.%(ext)s"
+                ),
+
+                "noplaylist": True,
+                "quiet": True,
+                "no_warnings": True,
+                "cachedir": False,
+                "retries": 3,
+                "fragment_retries": 3,
+                "socket_timeout": 20,
+                "progress_hooks": [
+                    self.progress_hook
+                ]
+            }
+
+            with yt_dlp.YoutubeDL(options) as downloader:
+                downloader.download([url])
+
+            Clock.schedule_once(
+                lambda dt:
+                self.download_finished(
+                    True,
+                    download_folder
+                ), 0
+            )
+
         except Exception as error:
-            self.set_status("Failed: private, unavailable, or login required.\n" + str(error)[:200])
-        finally:
-            self.set_busy(False)
+
+            message = str(error)
+
+            Clock.schedule_once(
+                lambda dt, msg=message:
+                self.download_finished(
+                    False,
+                    msg
+                ), 0
+            )
+
+    # Show download result
+    def download_finished(self, success, result):
+
+        self.download_button.disabled = False
+        self.download_button.text = "DOWNLOAD REEL"
+
+        if success:
+
+            self.progress.value = 100
+
+            self.status_label.text = (
+                "Download completed successfully!"
+            )
+
+            self.location_label.text = (
+                "Saved inside: " + result
+            )
+
+        else:
+
+            self.status_label.text = (
+                "Download failed: " + result[:180]
+            )
+
+            self.progress.value = 0
 
 
 if __name__ == "__main__":
