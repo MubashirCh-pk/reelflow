@@ -27,8 +27,6 @@ jobs:
           yes | buildozer -v android debug > build.log 2>&1 || {
             echo "===== LAST 80 LINES ====="
             tail -n 80 build.log
-            echo "===== ERROR LINES ====="
-            grep -n -i -E "error|exception|failed|not found" build.log | tail -n 30
             exit 1
           }
 
@@ -44,4 +42,3 @@ jobs:
         with:
           name: reelflow-apk
           path: bin/*.apk
-       
